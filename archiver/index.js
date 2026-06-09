@@ -1,55 +1,106 @@
-var archiver = require('archiver');
-var fs = require('fs');
+'use strict';
 
+/**
+ * Compress a downloaded site folder into public/sites/<name>.zip.
+ *
+ * Returns a promise so the caller can sequence "download -> compress -> done".
+ * Stream errors are reported to the client and reject the promise instead of
+ * being thrown inside a callback (which previously crashed the whole server).
+ * If the job was cancelled mid-compression, the partial zip is removed and the
+ * client is told "cancelled" rather than "done"/"error".
+ */
 
-module.exports= (file,io,data)=>{
+const fs = require('fs');
+const path = require('path');
+const archiverLib = require('archiver');
 
-    var output = fs.createWriteStream("./public/sites/" +file+ '.zip');
-var archive = archiver('zip', {
-  zlib: { level: 9 } // Sets the compression level.
-});
- 
-// listen for all archive data to be written
-// 'close' event is fired only when a file descriptor is involved
-output.on('close', function() {
-  console.log(archive.pointer() + ' total bytes');
-  console.log('archiver has been finalized and the output file descriptor has closed.');
-  io.emit(data.token,{progress:"Completed",file})
+const config = require('../config');
+const activeJobs = require('../lib/activeJobs');
 
-});
- 
-// This event is fired when the data source is drained no matter what was the data source.
-// It is not part of this library but rather from the NodeJS Stream API.
-// @see: https://nodejs.org/api/stream.html#stream_event_end
-output.on('end', function() {
-  console.log('Data has been drained');
-});
- 
-// good practice to catch warnings (ie stat failures and other non-blocking errors)
-archive.on('warning', function(err) {
-  if (err.code === 'ENOENT') {
-    // log warning
-  } else {
-    // throw error
-    throw err;
-  }
-});
- 
-// good practice to catch this error explicitly
-archive.on('error', function(err) {
-  throw err;
-});
- 
-// pipe archive data to the file
-archive.pipe(output);
+/**
+ * @param {string} folderName - sanitized host folder under DOWNLOAD_ROOT
+ * @param {import('socket.io').Server} io
+ * @param {{token: string}} data
+ * @returns {Promise<{file: string, bytes: number}>}
+ */
+module.exports = (folderName, io, data) =>
+  new Promise((resolve, reject) => {
+    const { token } = data;
 
-// append files from a sub-directory and naming it `new-subdir` within the archive
+    // Reject unsafe names defensively (path traversal, separators).
+    if (!config.FOLDER_NAME_REGEX.test(folderName)) {
+      const err = new Error('Refusing to archive an unsafe folder name.');
+      io.emit(token, { status: 'error', message: err.message });
+      return reject(err);
+    }
 
-archive.directory('./'+file,false);
+    // Make sure the output directory exists (fresh clone / wiped dir).
+    fs.mkdirSync(config.SITES_DIR, { recursive: true });
 
-// finalize the archive (ie we are done appending files but streams have to finish yet)
-// 'close', 'end' or 'finish' may be fired right after calling this method so register to them beforehand
-archive.finalize();
+    const zipPath = path.join(config.SITES_DIR, `${folderName}.zip`);
+    const sourceDir = path.join(config.DOWNLOAD_ROOT, folderName);
 
- 
-}
+    const output = fs.createWriteStream(zipPath);
+    const archive = archiverLib('zip', { zlib: { level: 9 } });
+
+    activeJobs.set(token, { archive });
+
+    const isCancelled = () => {
+      const entry = activeJobs.get(token);
+      return Boolean(entry && entry.cancelled);
+    };
+
+    let settled = false;
+    const settle = (fn) => {
+      if (settled) return;
+      settled = true;
+      fn();
+    };
+
+    output.on('close', () =>
+      settle(() => {
+        if (isCancelled()) {
+          fs.unlink(zipPath, () => {});
+          io.emit(token, { status: 'cancelled', message: 'Download cancelled.' });
+          return resolve({ file: folderName, bytes: 0, cancelled: true });
+        }
+        const bytes = archive.pointer();
+        io.emit(token, { status: 'done', file: folderName, bytes });
+        resolve({ file: folderName, bytes });
+      })
+    );
+
+    const fail = (err) =>
+      settle(() => {
+        archive.abort();
+        if (isCancelled()) {
+          fs.unlink(zipPath, () => {});
+          io.emit(token, { status: 'cancelled', message: 'Download cancelled.' });
+          return resolve({ file: folderName, bytes: 0, cancelled: true });
+        }
+        io.emit(token, { status: 'error', message: err.message });
+        reject(err);
+      });
+
+    output.on('error', fail);
+    archive.on('error', fail);
+
+    // Non-blocking warnings (e.g. a vanished file): log, don't crash.
+    archive.on('warning', (err) => {
+      if (err.code === 'ENOENT') console.warn('archiver warning:', err.message);
+      else fail(err);
+    });
+
+    // Surface compression progress so the UI can show a real bar.
+    archive.on('progress', (p) => {
+      io.emit(token, {
+        status: 'compressing',
+        processed: p.fs.processedBytes,
+        total: p.fs.totalBytes,
+      });
+    });
+
+    archive.pipe(output);
+    archive.directory(sourceDir, false);
+    archive.finalize();
+  });

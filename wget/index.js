@@ -1,76 +1,126 @@
-var util = require('util'),
-    exec = require('child_process').exec;
-    var archiver = require('../archiver')
-    var fs = require('fs');
-    var path = require('path');
+'use strict';
 
-module.exports=(io,data)=>{
-
-// download all website assets 
 /**
- * wget --mirror --convert-links --adjust-extension --page-requisites 
- * --no-parent http://example.org
- * --mirror – Makes (among other things) the download recursive.
- * --convert-links – convert all the links (also to stuff like CSS stylesheets) to relative, so it will be suitable for offline viewing.
- * --adjust-extension – Adds suitable extensions to filenames (html or css) depending on their content-type.
- * --page-requisites – Download things like CSS style-sheets and images required to properly display the page offline.
- * --no-parent – When recurring do not ascend to the parent directory. It useful for restricting the download to only a portion of the site.
+ * Run a wget mirror for one job, stream progress to the client, then hand the
+ * downloaded folder to the archiver.
+ *
+ * Security: the URL is validated upstream (lib/urlGuard) and wget is launched
+ * with spawn() + an argument array (lib/wgetArgs) — never an interpolated
+ * shell string — so user input can never be interpreted as a shell command.
+ *
+ * wget flag reference:
+ *   --mirror            recursive download
+ *   --convert-links     rewrite links to relative for offline viewing
+ *   --adjust-extension  add .html/.css by content-type
+ *   --page-requisites   fetch CSS/JS/images needed to render
+ *   --no-parent         stay within the starting path
  */
-let website ="";
-const child = exec(`wget -mkEpnp --no-if-modified-since ${data.website}`);
 
-// read stdout from the current child.
-child.stderr.on("data",(response)=>{
-    const responseText = response.toString();
+const { spawn } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 
-    if(!website)
-    {
-        const resolvingMatch = responseText.match(/Resolving\s+([^\s]+)\s+\(/);
-        if (resolvingMatch && resolvingMatch[1]) {
-            website = resolvingMatch[1];
-        }
-    }
-    io.emit(data.token,{progress:responseText})
-})
+const config = require('../config');
+const archiver = require('../archiver');
+const activeJobs = require('../lib/activeJobs');
+const { buildWgetArgs } = require('../lib/wgetArgs');
 
-child.stderr.on('close',(response)=>{
-    const websiteFolder = website || getWebsiteFolderName(data.website);
+/** Remove a downloaded mirror folder (after cancel, or once it has been zipped). */
+function removeDownloadFolder(folderName) {
+  if (!folderName || !config.FOLDER_NAME_REGEX.test(folderName)) return;
+  const directory = path.join(config.DOWNLOAD_ROOT, folderName);
+  fs.rm(directory, { recursive: true, force: true }, (err) => {
+    if (err) console.error(`Error removing download folder: ${err.message}`);
+  });
+}
 
-    if (!websiteFolder) {
-        io.emit(data.token, { progress: "Unable to determine downloaded website folder." });
-        return;
-    }
+/**
+ * @param {import('socket.io').Server} io
+ * @param {{token: string, url: string, folderName: string, options?: object}} job
+ * @returns {Promise<void>} resolves when the job ends (success, error or cancel)
+ */
+module.exports = (io, job) =>
+  new Promise((resolve) => {
+    const { token } = job;
+    const args = buildWgetArgs(job.url, job.options);
 
-    io.emit(data.token,{progress:"Converting"})
-    archiver(websiteFolder,io,data)
-})
+    fs.mkdirSync(config.DOWNLOAD_ROOT, { recursive: true });
+    const child = spawn('wget', args, { cwd: config.DOWNLOAD_ROOT });
+    activeJobs.set(token, { child, folderName: job.folderName, cancelled: false });
 
-// Handle process termination and cleanup
-child.on('exit', (code, signal) => {
-    if (signal === 'SIGTERM') {
-        console.log('Process terminated');
-        removePartiallyDownloadedFiles(website);
-    }
-});
+    let detectedFolder = '';
+    let fileCount = 0;
 
-function removePartiallyDownloadedFiles(website) {
-    const directory = path.join(__dirname, '../', website);
-    fs.rmdir(directory, { recursive: true }, (err) => {
-        if (err) {
-            console.error(`Error while removing partially downloaded files: ${err.message}`);
-        } else {
-            console.log('Partially downloaded files removed successfully');
-        }
+    io.emit(token, { status: 'downloading', message: `Starting download of ${job.url}` });
+
+    child.stderr.on('data', (chunk) => {
+      const text = chunk.toString();
+
+      // The real on-disk folder is the first path segment wget saves into;
+      // this is robust to www/redirect host changes. Fall back to the
+      // hostname derived from the validated URL.
+      if (!detectedFolder) {
+        const m = text.match(/Saving to: ['"]([^/'"]+)\//);
+        if (m && m[1]) detectedFolder = m[1];
+      }
+
+      if (text.includes('200 OK')) fileCount += 1;
+
+      const currentFile = (text.match(/Saving to: ['"]([^'"]+)['"]/) || [])[1];
+      io.emit(token, {
+        status: 'downloading',
+        fileCount,
+        currentFile,
+        message: text,
+      });
     });
-}
 
-function getWebsiteFolderName(websiteUrl) {
-    try {
-        const normalizedUrl = /^https?:\/\//i.test(websiteUrl) ? websiteUrl : `http://${websiteUrl}`;
-        const parsedUrl = new URL(normalizedUrl);
-        return parsedUrl.port ? `${parsedUrl.hostname}:${parsedUrl.port}` : parsedUrl.hostname;
-    } catch (error) {
-        return "";
-    }
-}
-}
+    // Fires if the wget binary itself cannot be spawned.
+    child.on('error', (err) => {
+      io.emit(token, {
+        status: 'error',
+        message: `Could not start wget: ${err.message}. Is wget installed?`,
+      });
+      activeJobs.delete(token);
+      resolve();
+    });
+
+    // 'close' (not 'exit') guarantees stderr has been fully drained.
+    child.on('close', async (code, signal) => {
+      const entry = activeJobs.get(token) || {};
+      const folderName = detectedFolder || job.folderName;
+
+      if (entry.cancelled || signal === 'SIGTERM') {
+        removeDownloadFolder(folderName);
+        io.emit(token, { status: 'cancelled', message: 'Download cancelled.' });
+        activeJobs.delete(token);
+        return resolve();
+      }
+
+      // wget exits non-zero for partial/server errors but may still have
+      // mirrored usable files — archive whenever the folder exists.
+      const sourceDir = folderName && path.join(config.DOWNLOAD_ROOT, folderName);
+      if (!folderName || !fs.existsSync(sourceDir)) {
+        io.emit(token, {
+          status: 'error',
+          message: `Download failed (wget exit ${code}); nothing to archive.`,
+        });
+        activeJobs.delete(token);
+        return resolve();
+      }
+
+      io.emit(token, { status: 'compressing', file: folderName });
+      try {
+        await archiver(folderName, io, job);
+        // Mirror is now zipped; drop the source folder to bound disk usage.
+        removeDownloadFolder(folderName);
+      } catch {
+        // archiver already emitted a structured error to the client.
+      } finally {
+        activeJobs.delete(token);
+        resolve();
+      }
+    });
+  });
+
+module.exports.removeDownloadFolder = removeDownloadFolder;

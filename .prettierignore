@@ -1,0 +1,4 @@
+node_modules
+public/sites
+coverage
+package-lock.json

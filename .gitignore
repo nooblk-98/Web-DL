@@ -26,3 +26,15 @@ build/Release
 # Dependency directory
 # https://docs.npmjs.com/misc/faq#should-i-check-my-node-modules-folder-into-git
 node_modules
+
+# Downloaded website mirrors (working area) and generated zips
+downloads
+public/sites/*.zip
+
+# Environment files
+.env
+.env.*
+
+# Local editor / agent settings
+.claude
+.vscode

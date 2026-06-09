@@ -1,44 +1,72 @@
+<main role="main" class="container app">
+  <header class="app-header">
+    <h1>Website Downloader</h1>
+    <p>Download all the source code and assets of any website for offline viewing.</p>
+  </header>
 
-
-<!-- partial:index.partial.html -->
-<header>
-  <div aria-busy="true" id="progress" hidden aria-label="Loading, please wait." role="progressbar"></div>
-</header>
-<main role="main">
-  <img src="https://www.google.com/inbox/assets/images/intro/intro-logo.png" width="100" alt="" />
-  <h1>Website Downloader</h1>
-  <p>Download all the source code and assets of any website </p>
-   <div class="container">
-  <div class="row">
-    <div class="col-lg-12" style="float: none; margin: 0 auto;">
-      <div id="custom-search-input">
-          <form method="get" class="form" action="/search">
-        <div class="input-group col-md-12">
-                <input type="text" class="form-control input-lg" id="website" placeholder="https://www.google.com" />
-                <span class="input-group-btn">
-                    <button class="btn btn-info btn-lg" id="download" type="button">
-                        <i class="glyphicon glyphicon-download"></i>
-                    </button>
-                </span><br>
-              </form>
-
-        </div><br>
-          <center><!-- Place this tag where you want the button to render. -->
-<a class="github-button" href="https://github.com/Ahmadibrahiim/Website-downloader" data-icon="octicon-star" data-size="large" data-show-count="true" aria-label="Star Ahmadibrahiim/Website-downloader on GitHub">Star</a></center>
-
-<a href="https://www.buymeacoffee.com/aibrahim" target="_blank"><img src="https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png" alt="Buy Me A Coffee" style="height: 41px !important;width: 174px !important;box-shadow: 0px 3px 2px 0px rgba(190, 190, 190, 0.5) !important;-webkit-box-shadow: 0px 3px 2px 0px rgba(190, 190, 190, 0.5) !important;" ></a>
-              
-      </div>
-      <br>
+  <form id="download-form" class="download-form" autocomplete="off">
+    <div class="input-group">
+      <input type="url" class="form-control input-lg" id="website"
+             placeholder="https://example.com" required />
+      <span class="input-group-btn">
+        <button class="btn btn-primary btn-lg" id="download" type="submit">Download</button>
+        <button class="btn btn-danger btn-lg" id="stop" type="button" hidden>Stop</button>
+      </span>
     </div>
-  </div>
-  <h5 hidden id='nFilesP'>Total Downloaded file: <span  id='nFiles' style="color: red;font-weight: bold">10</span></h5>
-  <p  class="log" id='log'></p>
-  <button style="display: none" class="btn btn-success">Download website assets</button>
-</div> 
 
+    <details class="options">
+      <summary>Advanced options</summary>
+      <div class="options-grid">
+        <label>Crawl depth
+          <input type="number" id="opt-depth" min="0" max="10" placeholder="5" />
+        </label>
+        <label>Max size (MB)
+          <input type="number" id="opt-maxSize" min="1" placeholder="2048" />
+        </label>
+        <label>Wait between requests (s)
+          <input type="number" id="opt-wait" min="0" max="30" placeholder="0" />
+        </label>
+        <label>Include extensions
+          <input type="text" id="opt-include" placeholder="html,css,png" />
+        </label>
+        <label>Exclude extensions
+          <input type="text" id="opt-exclude" placeholder="zip,exe" />
+        </label>
+        <label class="checkbox-line">
+          <input type="checkbox" id="opt-pageReq" checked /> Page requisites (CSS / JS / images)
+        </label>
+        <label class="checkbox-line">
+          <input type="checkbox" id="opt-external" /> Follow external links <em>(can be very large!)</em>
+        </label>
+      </div>
+    </details>
+  </form>
 
-  
+  <section id="status" class="status-panel" hidden>
+    <div class="status-line">
+      <span id="status-label" class="label label-default">idle</span>
+      <span id="status-message"></span>
+    </div>
+    <div class="progress">
+      <div id="progress-bar" class="progress-bar progress-bar-striped active"
+           role="progressbar" style="width:100%"></div>
+    </div>
+    <div class="status-meta">
+      <span>Files: <strong id="file-count">0</strong></span>
+      <span id="current-file" class="current-file"></span>
+      <span id="size-info"></span>
+    </div>
+    <pre id="log" class="log" aria-live="polite"></pre>
+    <a id="download-link" class="btn btn-success" hidden download>Download .zip</a>
+  </section>
+
+  <section class="history-panel">
+    <h3>
+      Recent downloads
+      <button id="refresh-history" class="btn btn-xs btn-default" type="button">Refresh</button>
+    </h3>
+    <ul id="history-list" class="history-list">
+      <li class="muted">No downloads yet.</li>
+    </ul>
+  </section>
 </main>
-<!-- partial -->
-  

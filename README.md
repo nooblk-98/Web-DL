@@ -11,11 +11,11 @@ Download the complete source code of any website (including all assets) 🔨.
 </div>
 
 ## Description 📒
- Website downloader works with `wget` and `archiver` to download all websites assets and compress then sends it back to the user through socket channel
- 
- **wget params the being used**
- 
- `wget --mirror --convert-links --adjust-extension --page-requisites 
+ Website downloader works with `wget` and `archiver` to download all of a website's assets, compress them, and send the zip back to the user over a Socket.IO channel.
+
+ **wget params being used**
+
+ `wget --mirror --convert-links --adjust-extension --page-requisites
 --no-parent http://example.org`
 
  **Explanation of the various flags:**
@@ -25,6 +25,41 @@ Download the complete source code of any website (including all assets) 🔨.
 - --adjust-extension – Adds suitable extensions to filenames (html or css) depending on their content-type.
 - --page-requisites – Download things like CSS style-sheets and images required to properly display the page offline.
 - --no-parent – When recursing do not ascend to the parent directory. It useful for restricting the download to only a portion of the site
+
+## Features ✨
+
+- **Safe by design** – URLs are launched with `spawn()` + an argument array (no shell), so a URL can never be interpreted as a command.
+- **SSRF protection** – the server refuses to download private, loopback, link-local or cloud-metadata addresses (it DNS-resolves the host first).
+- **Download options** – choose crawl depth, include/exclude file types, max size, wait between requests, whether to fetch page requisites, and whether to follow external links.
+- **Cancel / Stop** – stop a running download; the wget process is killed and partial files are removed.
+- **Concurrency control** – a configurable cap with a queue so the server can't be overwhelmed.
+- **Live progress** – real progress bar, file count, current file and downloaded size.
+- **Download history** – list, re-download or delete previously generated zips (`GET /api/history`, `DELETE /api/history/:name`).
+- **Auto-cleanup** – old zips are swept on an interval so disk usage stays bounded.
+
+### Configuration ⚙️
+
+All optional; sensible defaults are used. Set via environment variables:
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `PORT` | `3000` | HTTP port |
+| `MAX_CONCURRENT_DOWNLOADS` | `3` | Max simultaneous wget jobs |
+| `ZIP_TTL_MS` | `86400000` (24h) | Age after which generated zips are deleted |
+| `CLEANUP_INTERVAL_MS` | `3600000` (1h) | How often the cleanup sweep runs |
+| `DOWNLOAD_ROOT` | `./downloads` | Working directory for site mirrors |
+| `ALLOW_PRIVATE_HOSTS` | `false` | Set `true` to permit localhost/private hosts (local testing only) |
+
+### Development scripts 🧰
+
+- `npm start` – run the server
+- `npm run dev` – run with `NODE_ENV=development`
+- `npm test` – run the Jest unit tests
+- `npm run lint` / `npm run lint:fix` – ESLint
+- `npm run format` – Prettier
+
+> **Security note:** wget re-resolves DNS and follows redirects itself, so a public host that redirects to an internal address could still be reached. Redirects are capped (`--max-redirect`); for hardened deployments, also run the server in a network-restricted environment.
+
 ### Deploy on cloud providers
 [![Run on Replit](https://binbashbanana.github.io/deploy-buttons/buttons/remade/replit.svg)](https://replit.com/github/AhmadIbrahiim/Website-downloader)
 [![Remix on Glitch](https://binbashbanana.github.io/deploy-buttons/buttons/remade/glitch.svg)](https://glitch.com/edit/#!/import/github/AhmadIbrahiim/Website-downloader)
@@ -35,6 +70,8 @@ Download the complete source code of any website (including all assets) 🔨.
 
 
 ## How to run it 🤔
+
+Prerequisites: **Node.js 18+** and **`wget`** installed and on your `PATH`.
 
 - `git clone https://github.com/AhmadIbrahiim/Website-downloader.git`
 - `cd Website-downloader`
