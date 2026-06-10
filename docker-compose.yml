@@ -5,10 +5,10 @@ services:
     container_name: ${PROJECT_NAME:-website-downloader}
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "33000:3000"
     environment:
       NODE_ENV: production
-      PORT: 33000
+      PORT: 3000
       # --- Optional tuning (defaults shown; uncomment to override) ---------
       # MAX_CONCURRENT_DOWNLOADS: 3        # parallel wget jobs server-wide
       # ZIP_TTL_MS: 86400000              # delete generated zips older than this
