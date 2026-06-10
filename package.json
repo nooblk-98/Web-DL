@@ -1,6 +1,6 @@
 {
   "name": "website-downloader",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Download the complete source code and assets of any website for offline viewing.",
   "private": true,
   "engines": {
