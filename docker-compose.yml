@@ -1,0 +1,27 @@
+services:
+  web:
+    build: .
+    image: ${PROJECT_NAME:-website-downloader}
+    container_name: ${PROJECT_NAME:-website-downloader}
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      # --- Optional tuning (defaults shown; uncomment to override) ---------
+      # MAX_CONCURRENT_DOWNLOADS: 3        # parallel wget jobs server-wide
+      # ZIP_TTL_MS: 86400000              # delete generated zips older than this
+      # CLEANUP_INTERVAL_MS: 3600000      # how often the cleanup sweep runs
+      # MAX_DEPTH: 10                     # cap on recursion depth
+      # MAX_QUOTA_MB: 2048               # cap on per-download size
+      # MAX_WAIT_SECONDS: 30             # cap on inter-request wait
+      # ALLOW_PRIVATE_HOSTS: "false"     # SSRF guard; "true" only for local testing
+    volumes:
+      # Transient mirror working area + persisted generated zips.
+      - downloads:/app/downloads
+      - sites:/app/public/sites
+
+volumes:
+  downloads:
+  sites:
