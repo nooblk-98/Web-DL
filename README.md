@@ -1,56 +1,65 @@
-# Web-DL — Complete Website Downloader 💾
-
-Download the complete source code and assets of **any website** for offline viewing 🔨.
-
-Web-DL mirrors a site with `wget`, compresses it with `archiver`, and streams live
-progress back to your browser over a Socket.IO channel — then hands you a ready-to-download
-`.zip`.
-
 <div align="center">
 
-  ![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
-  ![License](https://img.shields.io/badge/license-MIT-blue)
+# Web-DL
+
+**Download the complete source and assets of any website for offline viewing.**
+
+[![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](https://nodejs.org)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE.md)
+[![CodeQL](https://img.shields.io/badge/CodeQL-enabled-2088FF?logo=github)](.github/workflows/codeql-analysis.yml)
+
+![Web-DL demo](public/Record.gif)
 
 </div>
 
----
+Web-DL mirrors a website with [`wget`](https://www.gnu.org/software/wget/), compresses it with [`archiver`](https://www.npmjs.com/package/archiver), and streams live progress back to your browser over a [Socket.IO](https://socket.io) channel — then hands you a ready-to-download `.zip`.
 
-## Description 📒
+## Features
 
-Web-DL works with `wget` and `archiver` to download all of a website's assets, compress
-them, and send the zip back to the user over a Socket.IO channel.
+- **Safe by design** — `wget` is launched with `spawn()` and an argument array (never a shell string), so a URL can't be interpreted as a command.
+- **SSRF protection** — the server DNS-resolves each host and refuses private, loopback, link-local and cloud-metadata addresses.
+- **Tunable downloads** — set crawl depth, include/exclude file types, a size quota, wait between requests, page requisites, and whether to follow external links.
+- **Cancel anytime** — stop a running job; the `wget` process is killed and partial files are removed.
+- **Concurrency control** — a configurable cap with a queue keeps the server from being overwhelmed.
+- **Live progress** — real-time progress bar, file count, current file and downloaded size.
+- **Download history** — list, re-download or delete previously generated zips.
+- **Auto-cleanup** — old zips are swept on an interval so disk usage stays bounded.
 
-**Base `wget` params being used**
+## Getting started
 
+> [!IMPORTANT]
+> Web-DL shells out to `wget`. Make sure **Node.js 18+** and **`wget`** are installed and on your `PATH`.
+
+```bash
+git clone https://github.com/nooblk-98/Web-DL.git
+cd Web-DL
+npm install
+npm start
 ```
+
+Then open <http://localhost:3000>, paste a URL, tweak the options, and download.
+
+## How it works
+
+Every download is built from a fixed set of base `wget` flags:
+
+```bash
 wget --mirror --convert-links --adjust-extension --page-requisites --no-if-modified-since <url>
 ```
 
-**Explanation of the various flags:**
+| Flag | Why |
+| --- | --- |
+| `--mirror` | recursive download of the whole site |
+| `--convert-links` | rewrite links (incl. CSS) to relative paths for offline viewing |
+| `--adjust-extension` | add `.html` / `.css` extensions based on content-type |
+| `--page-requisites` | fetch the CSS, JS and images needed to render each page |
+| `--no-if-modified-since` | always fetch resources instead of relying on conditional requests |
 
-- `--mirror` – makes (among other things) the download recursive.
-- `--convert-links` – convert all the links (also to stuff like CSS stylesheets) to relative, so it will be suitable for offline viewing.
-- `--adjust-extension` – adds suitable extensions to filenames (`.html` or `.css`) depending on their content-type.
-- `--page-requisites` – download things like CSS stylesheets and images required to properly display the page offline.
-- `--no-if-modified-since` – always fetch resources rather than relying on conditional requests.
+User-supplied options (depth, filters, `--no-parent`, etc.) are layered on top through a **strict allowlist** — raw flags from the client are never accepted.
 
-User-supplied options (crawl depth, file filters, `--no-parent`, etc.) are layered on top
-through a **strict allowlist** — raw flags from the client are never accepted.
+The request flows through the server like this:
 
-## Features ✨
-
-- **Safe by design** – URLs are launched with `spawn()` + an argument array (no shell), so a URL can never be interpreted as a command.
-- **SSRF protection** – the server refuses to download private, loopback, link-local or cloud-metadata addresses (it DNS-resolves the host first).
-- **Download options** – choose crawl depth, include/exclude file types, max size, wait between requests, whether to fetch page requisites, and whether to follow external links.
-- **Cancel / Stop** – stop a running download; the `wget` process is killed and partial files are removed.
-- **Concurrency control** – a configurable cap with a queue so the server can't be overwhelmed.
-- **Live progress** – real progress bar, file count, current file and downloaded size.
-- **Download history** – list, re-download or delete previously generated zips (`GET /api/history`, `DELETE /api/history/:name`).
-- **Auto-cleanup** – old zips are swept on an interval so disk usage stays bounded.
-
-## How it works 🧠
-
-```
+```text
 Browser ──Socket.IO──▶ socket/socket.js ──▶ lib/jobQueue.js ──▶ wget/index.js (spawn wget)
    ▲                                                                    │
    │  live progress, file counts, status                               ▼
@@ -66,9 +75,9 @@ Browser ──Socket.IO──▶ socket/socket.js ──▶ lib/jobQueue.js ─�
 4. `archiver/index.js` zips the mirrored folder into `public/sites/`, the temp mirror is removed, and the download link is sent back.
 5. `lib/cleanup.js` periodically deletes zips older than the configured TTL.
 
-## Configuration ⚙️
+## Configuration
 
-All optional; sensible defaults are used. Set via environment variables:
+Everything is optional and falls back to sensible defaults. Set via environment variables:
 
 | Variable | Default | Description |
 | --- | --- | --- |
@@ -82,31 +91,31 @@ All optional; sensible defaults are used. Set via environment variables:
 | `MAX_WAIT_SECONDS` | `30` | Upper bound for the wait-between-requests option |
 | `ALLOW_PRIVATE_HOSTS` | `false` | Set `true` to permit localhost/private hosts (local testing only) |
 
-## How to run it 🤔
+## HTTP API
 
-Prerequisites: **Node.js 18+** and **`wget`** installed and on your `PATH`.
+Beyond the Socket.IO download channel, a small REST API manages generated zips:
 
-```bash
-git clone https://github.com/nooblk-98/Web-DL.git
-cd Web-DL
-npm install
-npm start
-# open http://localhost:3000/
-```
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| `GET` | `/api/history` | List generated zips (`name`, `size`, `modified`, `url`) |
+| `DELETE` | `/api/history/:name` | Delete one zip (path-traversal guarded) |
+| `GET` | `/sites/:name.zip` | Re-download a zip (served via `express.static`) |
 
-## Development scripts 🧰
+## Scripts
 
-- `npm start` – run the server
-- `npm run dev` – run with `NODE_ENV=development`
-- `npm test` – run the Jest unit tests
-- `npm run lint` / `npm run lint:fix` – ESLint
-- `npm run format` – Prettier
+| Command | Description |
+| --- | --- |
+| `npm start` | Run the server |
+| `npm run dev` | Run with `NODE_ENV=development` |
+| `npm test` | Run the Jest unit tests |
+| `npm run lint` / `npm run lint:fix` | ESLint |
+| `npm run format` | Prettier |
 
-## Project structure 🗂️
+## Project structure
 
-```
+```text
 app.js              Express app wiring (routes, views, error handling)
-bin/www             Server entry point
+bin/www             Server entry point (HTTP + Socket.IO + cleanup)
 routes/             HTTP routes (index, users, history API)
 socket/             Socket.IO download orchestration
 lib/                Core logic: urlGuard, wgetArgs, jobQueue, activeJobs, sites, cleanup
@@ -118,29 +127,11 @@ public/             Static assets + generated zips (public/sites)
 __tests__/          Jest unit tests
 ```
 
-## Security note 🔒
+## Security
 
-> `wget` re-resolves DNS and follows redirects itself, so a public host that redirects to an
-> internal address could still be reached. Redirects are capped (`--max-redirect`); for
-> hardened deployments, also run the server in a network-restricted environment.
+> [!WARNING]
+> `wget` re-resolves DNS and follows redirects itself, so a public host that redirects to an internal address could still be reached. Redirects are capped via `--max-redirect`; for hardened deployments, also run the server in a network-restricted environment.
 
-## How to contribute 🤝
+## Credits
 
-- Open issue(s) with any bugs you notice.
-- Please create Pull Requests if you think it would be an added value towards the project.
-
-## Credits 🙏
-
-Web-DL is built on top of the original
-[**Website-downloader**](https://github.com/AhmadIbrahiim/Website-downloader) by
-[**Ahmad Ibrahim**](https://www.ahmed-ibrahim.com). Huge thanks to him for the original work
-that this project is based on.
-
-- 🌐 Website: <https://www.ahmed-ibrahim.com>
-- ✉️ Email: me@ahmed-ibrahim.com
-- ☕ Support the original author:
-  <a href="https://www.buymeacoffee.com/aibrahim" target="_blank">Buy Me A Coffee</a>
-
-## License 📄
-
-Released under the [MIT License](LICENSE.md).
+Web-DL is built on top of the original [**Website-downloader**](https://github.com/AhmadIbrahiim/Website-downloader) by [**Ahmad Ibrahim**](https://www.ahmed-ibrahim.com) — many thanks for the original work this project is based on.
